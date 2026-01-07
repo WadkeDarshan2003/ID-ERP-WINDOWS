@@ -49,7 +49,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     <div className="fixed sm:absolute right-1/2 sm:right-0 sm:left-auto left-1/2 -translate-x-1/2 sm:translate-x-0 top-12 w-[calc(100%-2rem)] sm:w-80 md:w-96 bg-white rounded-xl shadow-2xl border border-gray-100 z-50 overflow-hidden animate-fade-in">
       <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
         <h3 className="font-semibold text-gray-800">Notifications</h3>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {notifications.length > 0 && (
             <>
               <button 
@@ -68,6 +68,13 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
               </button>
             </>
           )}
+          <button 
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100 transition-colors"
+            title="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
       </div>
 

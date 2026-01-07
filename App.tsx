@@ -809,7 +809,10 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                         <h2 className="text-2xl font-bold text-gray-800">Projects</h2>
                           {(user.role === Role.ADMIN) && (
                             <button 
-                              onClick={() => setIsNewProjectModalOpen(true)}
+                              onClick={() => {
+                                setEditingProject(null);
+                                setIsNewProjectModalOpen(true);
+                              }}
                               className="bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2"
                             >
                                <Palette className="w-4 h-4" /> New Project

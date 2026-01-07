@@ -110,7 +110,17 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
     }
   };
   
-  const [activeTab, setActiveTab] = useState<'discovery' | 'plan' | 'financials' | 'team' | 'timeline' | 'documents' | 'meetings'>('plan');
+  const [activeTab, setActiveTab] = useState<'discovery' | 'plan' | 'financials' | 'team' | 'timeline' | 'documents' | 'meetings'>(() => {
+    // Priority: initialTab prop > localStorage > default ('meetings')
+    const savedTab = localStorage.getItem('lastProjectTab');
+    return (initialTab as any) || (savedTab as any) || 'meetings';
+  });
+
+  // Persist tab selection
+  useEffect(() => {
+    localStorage.setItem('lastProjectTab', activeTab);
+  }, [activeTab]);
+
   const [planView, setPlanView] = useState<'list' | 'gantt' | 'kanban'>('list');
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(!!initialTask);
   const [editingTask, setEditingTask] = useState<Partial<Task> | null>(initialTask || null);
@@ -201,6 +211,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
   const [deletingMeeting, setDeletingMeeting] = useState<Meeting | null>(null);
   const [isDocDeleteConfirmOpen, setIsDocDeleteConfirmOpen] = useState(false);
   const [deletingDoc, setDeletingDoc] = useState<ProjectDocument | null>(null);
+  const [isRemoveLeadDesignerConfirmOpen, setIsRemoveLeadDesignerConfirmOpen] = useState(false);
 
   // Vendor Billing Report State
   const [selectedVendorForBilling, setSelectedVendorForBilling] = useState<User | null>(null);
@@ -5263,11 +5274,22 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
                   })()}
                </div>
 
-                  <div className="flex items-center gap-4 border-b border-gray-50 pb-2">
-                     <div>
-                        <p className="text-base md:text-sm font-bold text-gray-900">{getAssigneeName(project.leadDesignerId)}</p>
-                        <p className="text-sm text-gray-500">Lead Designer</p>
-                     </div>
+                  <div className="flex items-center justify-between border-b border-gray-50 pb-2">
+                    <div className="flex items-center gap-4">
+                       <div>
+                          <p className="text-base md:text-sm font-bold text-gray-900">{getAssigneeName(project.leadDesignerId)}</p>
+                          <p className="text-sm text-gray-500">Lead Designer</p>
+                       </div>
+                    </div>
+                    {user.role === Role.ADMIN && project.leadDesignerId && (
+                      <button 
+                        onClick={() => setIsRemoveLeadDesignerConfirmOpen(true)}
+                        className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded transition-colors"
+                        title="Remove Lead Designer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   
                   {/* Designers */}
@@ -6848,8 +6870,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
                                    <input 
                                       type="text" 
                                       value={st.title}
-                                      placeholder="Subtask title"
+                                      placeholder="New Item"
                                       disabled={isEditingFrozen}
+                                      onFocus={(e) => {
+                                        if (st.title === 'New Item') {
+                                           const newSubs = [...(editingTask.subtasks || [])];
+                                           newSubs[idx].title = '';
+                                           setEditingTask({...editingTask, subtasks: newSubs});
+                                        }
+                                      }}
                                       onChange={(e) => {
                                          const newSubs = [...(editingTask.subtasks || [])];
                                          newSubs[idx].title = e.target.value;
@@ -7219,7 +7248,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
 
       {/* Delete Confirmation Modal */}
       {isDeleteConfirmOpen && deleteConfirmTask && createPortal(
-        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-start justify-center pt-20 p-4">
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-gray-200 overflow-hidden">
             {/* Header */}
             <div className="p-6 border-b border-gray-100 bg-red-50">
@@ -7273,7 +7302,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
 
       {/* Meeting Delete Confirmation Modal */}
       {isMeetingDeleteConfirmOpen && deletingMeeting && createPortal(
-        <div className="fixed inset-0 bg-black/50 z-[60] flex items-start justify-center pt-20 p-4">
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fade-in border border-gray-200">
             {/* Header */}
             <div className="p-6 border-b border-gray-100 bg-red-50">
@@ -7333,7 +7362,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
 
       {/* Document Delete Confirmation Modal */}
       {isDocDeleteConfirmOpen && deletingDoc && createPortal(
-        <div className="fixed inset-0 bg-black/50 z-[60] flex items-start justify-center pt-20 p-4">
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md animate-fade-in border border-gray-200">
             {/* Header */}
             <div className="p-6 border-b border-gray-100 bg-red-50">
@@ -7378,6 +7407,70 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
                 title="Confirm document deletion"
               >
                 <Trash2 className="w-4 h-4" /> Delete Document
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Remove Lead Designer Confirmation Modal */}
+      {isRemoveLeadDesignerConfirmOpen && createPortal(
+        <div className="fixed inset-0 bg-black/50 z-[10000] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md animate-fade-in border border-gray-200 overflow-hidden">
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 bg-red-50">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 text-red-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-900">Remove Lead Designer?</h2>
+                  <p className="text-sm text-gray-600 mt-1">This will unassign the primary designer.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="p-6">
+              <p className="text-sm text-gray-700 mb-4">
+                Are you sure you want to remove <span className="font-bold text-gray-900">"{getAssigneeName(project.leadDesignerId)}"</span> as the Lead Designer of this project? 
+              </p>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-xs text-red-700">
+                  <span className="font-bold">⚠️ Warning:</span> This designer will no longer be the primary contact for this project. They can still be added as a team member.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-6 border-t border-gray-100 flex gap-3 justify-end bg-gray-50 rounded-b-xl">
+              <button
+                onClick={() => setIsRemoveLeadDesignerConfirmOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                title="Cancel removal"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setIsRemoveLeadDesignerConfirmOpen(false);
+                    showLoading('Updating Project...');
+                    const updatedProject = { ...project, leadDesignerId: '' };
+                    await updateExistingProject(project.id, { leadDesignerId: '' });
+                    onUpdateProject(updatedProject);
+                    addNotification('Success', 'Lead Designer removed from project', 'success');
+                  } catch (error: any) {
+                    addNotification('Error', error.message || 'Failed to remove lead designer', 'error');
+                  } finally {
+                    hideLoading();
+                  }
+                }}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+                title="Confirm removal"
+              >
+                <Ban className="w-4 h-4" /> Remove Designer
               </button>
             </div>
           </div>

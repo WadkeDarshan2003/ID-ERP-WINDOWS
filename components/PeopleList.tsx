@@ -324,6 +324,7 @@ const PeopleList: React.FC<PeopleListProps> = ({ users, roleFilter, onAddUser, p
 
       // Close modal and reset form
       setIsModalOpen(false);
+      setEditingUser(null);
       setNewUser({ role: roleFilter === 'All' ? Role.CLIENT : roleFilter });
       setShowErrors(false);
 
@@ -530,6 +531,7 @@ const PeopleList: React.FC<PeopleListProps> = ({ users, roleFilter, onAddUser, p
             {!(currentUser?.role === Role.DESIGNER && roleFilter === Role.CLIENT) && (
               <button 
                 onClick={() => {
+                  setEditingUser(null);
                   setNewUser({ 
                     role: roleFilter === 'All' ? Role.CLIENT : roleFilter,
                     phone: '+91 '
@@ -604,11 +606,18 @@ const PeopleList: React.FC<PeopleListProps> = ({ users, roleFilter, onAddUser, p
 
       {/* Add User Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 pt-24">
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[75vh] overflow-hidden animate-fade-in flex flex-col">
             <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gray-50 flex-shrink-0">
               <h3 className="text-lg font-bold text-gray-900">{editingUser ? 'Edit Profile' : `Add New ${roleFilter === 'All' ? 'Person' : roleFilter}`}</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600" title="Close add person dialog">
+              <button 
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingUser(null);
+                }} 
+                className="text-gray-400 hover:text-gray-600" 
+                title="Close add person dialog"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>

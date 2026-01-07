@@ -352,7 +352,7 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({ users, onClose, onSav
   `;
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in">
         <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white sticky top-0 z-10">
           <h2 className="text-xl font-bold text-gray-900">{isEditMode ? 'Edit Project' : 'Create New Project'}</h2>
