@@ -23,19 +23,16 @@ export const useTenantBranding = (): TenantBranding => {
 
   useEffect(() => {
     const fetchBranding = async () => {
-      console.log('🎨 useTenantBranding: Starting fetch for user:', user?.name, 'tenantId:', user?.tenantId);
       setBranding(prev => ({ ...prev, isLoading: true }));
       
       try {
         const tenantBranding = await getTenantBranding(user?.tenantId);
-        console.log('🎨 useTenantBranding: Received branding:', tenantBranding);
         setBranding({
           brandName: tenantBranding.brandName,
           logoUrl: tenantBranding.logoUrl,
           isLoading: false
         });
       } catch (error) {
-        console.error('❌ useTenantBranding: Error fetching tenant branding:', error);
         setBranding({
           brandName: 'Kydo Solutions',
           logoUrl: 'kydoicon.png',
