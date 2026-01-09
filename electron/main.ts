@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, Notification, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -31,6 +31,32 @@ function createWindow() {
       case 'minimize': win.minimize(); break;
       case 'maximize': win.isMaximized() ? win.unmaximize() : win.maximize(); break;
       case 'close': win.close(); break;
+    }
+  });
+
+  // Show native notifications requested from renderer
+  ipcMain.on('show-notification', (_, payload) => {
+    try {
+      const notif = new Notification({
+        title: payload.title || 'Notification',
+        body: payload.body || ''
+      });
+      notif.show();
+
+      notif.on('click', () => {
+        // If payload has a URL, open externally. Otherwise focus window and forward event
+        if (payload?.data?.url) {
+          shell.openExternal(payload.data.url);
+        } else {
+          const bw = BrowserWindow.getAllWindows()[0];
+          if (bw) {
+            bw.focus();
+            bw.webContents.send('notification-click', payload.data || {});
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to show native notification:', e);
     }
   });
 }

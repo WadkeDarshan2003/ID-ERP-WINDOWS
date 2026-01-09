@@ -11,7 +11,7 @@ import { NotificationProvider, useNotifications } from './contexts/NotificationC
 import { LoadingProvider } from './contexts/LoadingContext';
 import { subscribeToProjects, subscribeToUserProjects, subscribeToUsers, subscribeToDesigners, subscribeToVendors, subscribeToClients, seedDatabase, updateProject, deleteProject, syncAllVendorMetrics } from './services/firebaseService';
 import { subscribeToProjectTasks } from './services/projectDetailsService';
-import { requestNotificationPermission, onMessageListener } from './services/pushNotificationService';
+import { requestNotificationPermission, onMessageListener, initElectronNotificationListener } from './services/pushNotificationService';
 import { AvatarCircle } from './utils/avatarUtils';
 import { formatDateToIndian } from './utils/taskUtils';
 
@@ -155,6 +155,7 @@ const ProjectList = ({
                       {user?.role === Role.ADMIN && (
                         <>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditingProject(project);
@@ -162,10 +163,12 @@ const ProjectList = ({
                             }}
                             className="p-2 rounded text-xs font-bold shadow-sm border border-gray-200 hover:bg-gray-100 transition-colors"
                             title="Edit project"
+                            aria-label="Edit project"
                           >
                             <Edit className="w-4 h-4 text-gray-900" />
                           </button>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (window.confirm(`Are you sure you want to delete project "${project.name}"? This action cannot be undone.`)) {
@@ -174,6 +177,7 @@ const ProjectList = ({
                             }}
                             className="p-2 rounded text-xs font-bold shadow-sm border border-gray-200 hover:bg-red-50 transition-colors"
                             title="Delete project"
+                            aria-label="Delete project"
                           >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </button>
@@ -278,6 +282,23 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
           });
         }
       }).catch(err => console.log('failed: ', err));
+      
+      // If running inside Electron, initialize Firestore listener for native notifications
+      let _unsubscribeElectron: any = null;
+      try {
+        if ((window as any).electronAPI) {
+          _unsubscribeElectron = initElectronNotificationListener(user.id);
+        }
+      } catch (e) {
+        console.warn('Electron notification init failed:', e);
+      }
+
+      // Cleanup for the electron listener
+      return () => {
+        if (_unsubscribeElectron) {
+          try { _unsubscribeElectron(); } catch (e) {}
+        }
+      };
     }
   }, [user]);
 
@@ -531,6 +552,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
   const SidebarItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
+      type="button"
       onClick={() => {
         setCurrentView(view);
         setSelectedProject(null);
@@ -543,6 +565,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
           ? 'bg-gray-900 text-white shadow-lg' 
           : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}
       title={isSidebarCollapsed ? label : ""}
+      aria-label={label}
     >
       <Icon className="w-5 h-5 flex-shrink-0" />
       {!isSidebarCollapsed && <span className="font-medium">{label}</span>}
@@ -575,13 +598,14 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
             {isSidebarCollapsed && (
               <img src={logoUrl} alt={`${brandName} Logo`} className="h-8 w-8" style={{ background: 'none', filter: 'invert(0)' }} />
             )}
-            <button className="md:hidden" onClick={() => setIsSidebarOpen(false)} title="Close sidebar">
+            <button type="button" className="md:hidden" onClick={() => setIsSidebarOpen(false)} title="Close sidebar" aria-label="Close sidebar">
               <X className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
           {/* Toggle Button - On Right Border */}
           <button 
+            type="button"
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
             className="hidden md:flex absolute -right-3 top-6 w-7 h-7 bg-white text-gray-900 rounded-full items-center justify-center hover:bg-gray-100 transition-colors shadow-md border border-gray-200 z-40"
             title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -635,6 +659,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
           <div className="p-4 border-t border-gray-200">
             <button 
+              type="button"
               onClick={async () => {
                 try {
                   await logout();
@@ -644,6 +669,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
               }}
               className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
               title={isSidebarCollapsed ? "Sign Out" : ""}
+              aria-label="Sign Out"
             >
               <LogOut className="w-5 h-5 flex-shrink-0" />
               {!isSidebarCollapsed && <span className="font-medium">Sign Out</span>}
@@ -665,14 +691,17 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
             </div>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={handleEnableNotifications}
                 className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 Enable
               </button>
               <button
+                type="button"
                 onClick={() => setShowNotifPermissionBanner(false)}
                 className="text-blue-600 px-2 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors"
+                aria-label="Dismiss notification permission banner"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -684,16 +713,18 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
         {/* Added relative and z-20 to ensure dropdowns overlap sticky content in main */}
         <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 relative z-20">
           <div className="flex items-center gap-4">
-            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Toggle sidebar menu">
+            <button type="button" onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Toggle sidebar menu" aria-label="Toggle sidebar menu">
               <Menu className="w-6 h-6" />
             </button>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
               <button 
+                type="button"
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
                 className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                 title="Toggle notifications"
+                aria-label="Toggle notifications"
               >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
@@ -780,12 +811,13 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                       <div className="flex justify-between items-center">
                         <h2 className="text-2xl font-bold text-gray-800">Projects</h2>
                           {(user.role === Role.ADMIN) && (
-                            <button 
-                              onClick={() => setIsNewProjectModalOpen(true)}
-                              className="bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2"
-                            >
-                               <Palette className="w-4 h-4" /> New Project
-                            </button>
+                              <button 
+                                type="button"
+                                onClick={() => setIsNewProjectModalOpen(true)}
+                                className="bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2"
+                              >
+                                 <Palette className="w-4 h-4" /> New Project
+                              </button>
                           )}
                       </div>
                       {visibleProjects.length > 0 ? (
@@ -895,6 +927,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                               <p className="text-sm text-gray-600">Customize your organization's brand name and logo</p>
                             </div>
                             <button
+                              type="button"
                               onClick={() => setIsBrandingSettingsOpen(true)}
                               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
                             >

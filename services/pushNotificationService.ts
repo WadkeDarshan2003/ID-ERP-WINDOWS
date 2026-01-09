@@ -1,6 +1,6 @@
 import { getToken, onMessage } from "firebase/messaging";
 import { messaging, db } from "./firebaseConfig";
-import { doc, updateDoc, arrayUnion, getDoc, setDoc } from "firebase/firestore";
+import { doc, updateDoc, arrayUnion, getDoc, setDoc, collection, query, where, onSnapshot } from "firebase/firestore";
 
 export const requestNotificationPermission = async (userId: string): Promise<string | null> => {
   if (!messaging) {
@@ -138,6 +138,41 @@ export const sendPushNotification = async (
 
   } catch (error) {
     console.error("Error sending push notification:", error);
+  }
+};
+
+/**
+ * Initialize a Firestore listener for Electron desktop clients.
+ * When a new notification doc is added for the user, forward it
+ * to the main process to show a native OS notification.
+ * Returns an unsubscribe function.
+ */
+export const initElectronNotificationListener = (userId: string) => {
+  try {
+    // Only run in Electron renderer where `electronAPI` bridge exists
+    if (typeof window === 'undefined' || !(window as any).electronAPI) return () => {};
+
+    const q = query(collection(db, 'notifications'), where('recipientId', '==', userId), where('read', '==', false));
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      snap.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          try {
+            (window as any).electronAPI.showNotification(data.title || 'New Notification', data.body || '', { url: data.url, id: change.doc.id });
+          } catch (e) {
+            console.warn('Electron notify failed:', e);
+          }
+        }
+      });
+    }, (err) => {
+      console.error('Electron notification listener error:', err);
+    });
+
+    return unsubscribe;
+  } catch (e) {
+    console.error('initElectronNotificationListener error:', e);
+    return () => {};
   }
 };
 
