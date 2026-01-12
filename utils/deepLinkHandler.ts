@@ -114,12 +114,14 @@ export const buildDeepLinkPath = (target: Partial<DeepLinkTarget>): string => {
   return '/';
 };
 
+import { Dispatch, SetStateAction } from 'react';
+
 /**
  * Navigation handler that executes actual navigation in the app.
  * This is called from the app when a notification is clicked.
  */
 export interface DeepLinkNavigator {
-  setCurrentView: (view: ViewState) => void;
+  setCurrentView: Dispatch<SetStateAction<ViewState>>;
   setSelectedProject: (project: any) => void;
   setSelectedTask: (task: any) => void;
   setInitialProjectTab: (tab: any) => void;

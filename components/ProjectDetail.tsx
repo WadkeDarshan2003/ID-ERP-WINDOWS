@@ -2867,7 +2867,6 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
             await updateTask(project.id, editingTask.id, { 
               approvals: updatedApprovals
             });
-            if (process.env.NODE_ENV !== 'production') console.log(`✅ Approval updated in Firebase`);
             
             const revokeNow = new Date().toISOString();
             await logTimelineEvent(
@@ -2878,7 +2877,6 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ project, users, onUpdateP
               revokeNow,
               revokeNow
             );
-            if (process.env.NODE_ENV !== 'production') console.log(`✅ Timeline event logged`);
             
             addNotification('Approval Revoked', `${targetRole} approval for ${stage} stage revoked.`, 'info');
           } catch (error) {
