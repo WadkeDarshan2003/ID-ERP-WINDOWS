@@ -1,22 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, FolderKanban, Users, ShoppingBag, 
-  Palette, LogOut, Bell, Menu, X, Tag, Edit, Trash2, Settings, Shield
+  Palette, LogOut, Bell, Menu, X, Tag, Edit, Trash2, Settings, Shield, Building2, ChevronDown
 } from 'lucide-react';
 import { IoPersonOutline } from 'react-icons/io5';
 import { MOCK_PROJECTS, MOCK_USERS } from './constants';
 import { Project, Role, User, ProjectStatus, ProjectType, ProjectCategory, Task } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import { LoadingProvider } from './contexts/LoadingContext';
 import { subscribeToProjects, subscribeToUserProjects, subscribeToUsers, subscribeToDesigners, subscribeToVendors, subscribeToClients, seedDatabase, updateProject, deleteProject, syncAllVendorMetrics } from './services/firebaseService';
 import { subscribeToProjectTasks } from './services/projectDetailsService';
-import { requestNotificationPermission, onMessageListener } from './services/pushNotificationService';
+import { requestNotificationPermission, onMessageListener, initElectronNotificationListener } from './services/pushNotificationService';
 import { AvatarCircle } from './utils/avatarUtils';
 import { formatDateToIndian } from './utils/taskUtils';
-import { DeepLinkTarget, executeDeepLink } from './utils/deepLinkHandler';
-import { Capacitor } from '@capacitor/core';
 
 // Components
 import Dashboard from './components/Dashboard';
@@ -28,6 +25,10 @@ import NewProjectModal from './components/NewProjectModal';
 import Loader from './components/Loader';
 import RememberedDevices from './components/RememberedDevices';
 import SessionExpiryWarning from './components/SessionExpiryWarning';
+import BrandingSettings from './components/BrandingSettings';
+import FirmSettings from './components/FirmSettings';
+import { PageTitleUpdater } from './components/PageTitleUpdater';
+import { useTenantBranding } from './hooks/useTenantBranding';
 
 import { calculateProjectProgress } from './utils/taskUtils';
 
@@ -137,9 +138,9 @@ const ProjectList = ({
                   <p className="text-base text-gray-600 md:text-sm md:text-gray-500 mb-4 line-clamp-2 mobile-increase">{project.description}</p>
                   {/* Progress Bar (moved above due date) */}
                   <div className="mt-2">
-                     <div className="flex justify-between mb-1">
-                        <span className="text-gray-500 text-[10px]">Progress</span>
-                        <span className="text-gray-900 font-bold text-[10px]">
+                     <div className="flex justify-between text-xs mb-1">
+                        <span className="text-gray-500 mobile-increase">Progress</span>
+                        <span className="text-gray-900 font-bold mobile-increase">
                           {calculateProjectProgress(realTimeTasks.get(project.id) || project.tasks)}%
                         </span>
                       </div>
@@ -155,6 +156,7 @@ const ProjectList = ({
                       {user?.role === Role.ADMIN && (
                         <>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditingProject(project);
@@ -162,10 +164,12 @@ const ProjectList = ({
                             }}
                             className="p-2 rounded text-xs font-bold shadow-sm border border-gray-200 hover:bg-gray-100 transition-colors"
                             title="Edit project"
+                            aria-label="Edit project"
                           >
                             <Edit className="w-4 h-4 text-gray-900" />
                           </button>
                           <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               if (window.confirm(`Are you sure you want to delete project "${project.name}"? This action cannot be undone.`)) {
@@ -174,6 +178,7 @@ const ProjectList = ({
                             }}
                             className="p-2 rounded text-xs font-bold shadow-sm border border-gray-200 hover:bg-red-50 transition-colors"
                             title="Delete project"
+                            aria-label="Delete project"
                           >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </button>
@@ -224,8 +229,9 @@ interface AppContentProps {
 
 function AppContent({ projects, setProjects, users, setUsers }: AppContentProps) {
 
-  const { user, logout, loading: authLoading } = useAuth();
-  const { unreadCount, addNotification, setDeepLinkHandler } = useNotifications();
+  const { user, logout, loading: authLoading, currentTenant } = useAuth();
+  const { unreadCount, addNotification } = useNotifications();
+  const { brandName, logoUrl } = useTenantBranding();
   
   const [currentView, setCurrentView] = useState<ViewState>(() => {
     // Default clients to Projects view, others to Dashboard
@@ -243,39 +249,33 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [isBrandingSettingsOpen, setIsBrandingSettingsOpen] = useState(false);
+  const [isFirmSettingsOpen, setIsFirmSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [realTimeTasks, setRealTimeTasks] = useState<Map<string, Task[]>>(new Map());
   const [showNotifPermissionBanner, setShowNotifPermissionBanner] = useState(false);
-
+  
+  // --- Multi-tenant Admin State ---
+  const [selectedFirmId, setSelectedFirmId] = useState<string | null>(null);
+  
   // --- Project Filter State ---
   const [projectNameFilter, setProjectNameFilter] = useState('');
   const [projectCategoryFilterValue, setProjectCategoryFilterValue] = useState<ProjectCategory | 'All'>('All');
   const [projectSortBy, setProjectSortBy] = useState<'name-asc' | 'name-desc' | 'progress-asc' | 'progress-desc' | 'recent-asc' | 'recent-desc'>('recent-desc');
 
-  // Set up deep-link handler for notifications
+  // Sync currentTenant from AuthContext to local selectedFirmId
   useEffect(() => {
-    const handleDeepLink = (target: DeepLinkTarget) => {
-      executeDeepLink(target, {
-        setCurrentView,
-        setSelectedProject,
-        setSelectedTask,
-        setInitialProjectTab,
-        projects,
-        tasks: realTimeTasks
-      });
-    };
-
-    setDeepLinkHandler(handleDeepLink);
-  }, [projects, realTimeTasks, setDeepLinkHandler]);
+    if (currentTenant?.id) {
+      setSelectedFirmId(currentTenant.id);
+    }
+  }, [currentTenant?.id]);
 
   // Initialize push notifications
   useEffect(() => {
     if (user) {
       // Check current permission status
       const checkPermission = async () => {
-        if (Capacitor.isNativePlatform()) {
-          await requestNotificationPermission(user.id);
-        } else if ('Notification' in window) {
+        if ('Notification' in window) {
           const permission = Notification.permission;
           if (permission === 'default') {
             // Show banner to request permission
@@ -289,20 +289,35 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
       
       checkPermission();
       
-      onMessageListener((notif: any) => {
-        addNotification({
-          title: notif.title,
-          message: notif.message || notif.body,
-          type: 'info',
-          projectId: notif.projectId,
-          taskId: notif.taskId,
-          meetingId: notif.meetingId,
-          targetTab: notif.targetTab,
-          deepLinkPath: notif.deepLinkPath,
-        });
+      onMessageListener().then((payload: any) => {
+        // console.log('Received foreground message: ', payload);
+        if (payload?.notification) {
+          addNotification({
+            title: payload.notification.title,
+            message: payload.notification.body,
+            type: 'info'
+          });
+        }
       }).catch(err => console.log('failed: ', err));
+      
+      // If running inside Electron, initialize Firestore listener for native notifications
+      let _unsubscribeElectron: any = null;
+      try {
+        if ((window as any).electronAPI) {
+          _unsubscribeElectron = initElectronNotificationListener(user.id);
+        }
+      } catch (e) {
+        console.warn('Electron notification init failed:', e);
+      }
+
+      // Cleanup for the electron listener
+      return () => {
+        if (_unsubscribeElectron) {
+          try { _unsubscribeElectron(); } catch (e) {}
+        }
+      };
     }
-  }, [user, addNotification]);
+  }, [user]);
 
   const handleEnableNotifications = async () => {
     if (user) {
@@ -310,17 +325,11 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
       if (token) {
         setShowNotifPermissionBanner(false);
         // Test notification
-        if (!Capacitor.isNativePlatform() && Notification.permission === 'granted') {
+        if (Notification.permission === 'granted') {
           new Notification('Notifications Enabled! 🎉', {
             body: 'You will now receive push notifications for project updates',
             icon: '/icons/icon-192x192.png',
             badge: '/icons/icon-192x192.png'
-          });
-        } else if (Capacitor.isNativePlatform()) {
-          addNotification({
-            title: 'Notifications Enabled! 🎉',
-            message: 'You will now receive push notifications for project updates',
-            type: 'success'
           });
         }
       }
@@ -350,6 +359,9 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
     setIsLoading(false); // No loading state needed, show empty immediately
 
+    // Determine effective tenant ID - use currentTenant if switching, otherwise user's default
+    const effectiveTenantId = currentTenant?.id || user.tenantId;
+
     // Subscribe to projects (will be empty initially)
     let unsubscribeProjects: any;
     
@@ -363,16 +375,20 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
       
       // Sync all vendor metrics whenever projects change (except for vendors)
       if (user.role !== Role.VENDOR) {
-        syncAllVendorMetrics(user.tenantId).catch((err: any) => {
+        syncAllVendorMetrics(effectiveTenantId).catch((err: any) => {
           console.error('Failed to sync vendor metrics:', err);
         });
       }
-    }, user.tenantId);
+    }, effectiveTenantId);
 
     // Subscribe to users - combines from all role collections
     const unsubscribeUsers = subscribeToUsers((firebaseUsers) => {
-      setUsers(firebaseUsers || []);
-    }, user.tenantId);
+      setUsers(prev => {
+        const newIds = new Set(firebaseUsers.map(u => u.id));
+        const others = prev.filter(u => !newIds.has(u.id));
+        return [...others, ...firebaseUsers];
+      });
+    }, effectiveTenantId);
 
     // Also subscribe to role-specific collections for redundancy/updates
     const unsubscribeDesigners = subscribeToDesigners((designers) => {
@@ -382,7 +398,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
         const others = prev.filter(u => !newIds.has(u.id));
         return [...others, ...designers];
       });
-    }, user.tenantId);
+    }, effectiveTenantId);
 
     const unsubscribeVendors = subscribeToVendors((vendors) => {
       // Replace all vendors with the new list, ensuring no ID duplicates
@@ -391,7 +407,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
         const others = prev.filter(u => !newIds.has(u.id));
         return [...others, ...vendors];
       });
-    }, user.tenantId);
+    }, effectiveTenantId);
 
     const unsubscribeClients = subscribeToClients((clients) => {
       // Replace all clients with the new list, ensuring no ID duplicates
@@ -400,7 +416,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
         const others = prev.filter(u => !newIds.has(u.id));
         return [...others, ...clients];
       });
-    }, user.tenantId);
+    }, effectiveTenantId);
 
     // Cleanup subscriptions on unmount
     return () => {
@@ -410,7 +426,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
       unsubscribeVendors();
       unsubscribeClients();
     };
-  }, [user, setProjects, setUsers]);
+  }, [user, currentTenant, setProjects, setUsers, selectedFirmId]);
 
     // Apply pending deep-link after projects or realTimeTasks update
     useEffect(() => {
@@ -519,7 +535,10 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
   };
 
   const handleAddUser = (newUser: User) => {
-    setUsers(prev => [...prev, newUser]);
+    setUsers(prev => {
+      if (prev.find(u => u.id === newUser.id)) return prev;
+      return [...prev, newUser];
+    });
   };
 
   const handleAddProject = (newProject: Project) => {
@@ -553,6 +572,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
   const SidebarItem = ({ view, icon: Icon, label }: { view: ViewState, icon: any, label: string }) => (
     <button
+      type="button"
       onClick={() => {
         setCurrentView(view);
         setSelectedProject(null);
@@ -565,6 +585,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
           ? 'bg-gray-900 text-white shadow-lg' 
           : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}
       title={isSidebarCollapsed ? label : ""}
+      aria-label={label}
     >
       <Icon className="w-5 h-5 flex-shrink-0" />
       {!isSidebarCollapsed && <span className="font-medium">{label}</span>}
@@ -575,9 +596,6 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       <Loader />
       <SessionExpiryWarning />
-        {/* Status Bar Spacer - Fixed above all (higher z-index) */}
-      <div className="status-bar-spacer bg-gray-900 w-full fixed top-0 left-0 right-0 z-50"></div>
-      
       {/* Mobile Overlay */}
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setIsSidebarOpen(false)} />
@@ -585,28 +603,29 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
       {/* Sidebar */}
       <aside className={`
-        fixed inset-y-0 left-0 z-30 bg-white transform transition-all duration-300 ease-in-out md:relative md:translate-x-0 md:border-r md:border-gray-200
+        fixed inset-y-0 left-0 z-30 bg-white border-r border-gray-200 transform transition-all duration-300 ease-in-out md:relative md:translate-x-0
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
         ${isSidebarCollapsed ? 'md:w-20' : 'md:w-64 w-64'}
       `}>
         <div className="h-full flex flex-col relative">
-          <div className="p-6 flex items-center justify-between pt-[calc(0.5rem+env(safe-area-inset-top))]">
+          <div className="p-6 flex items-center justify-between">
             {!isSidebarCollapsed && (
-              <div className="flex items-center gap-3">
-                <img src="/kydoicon.png" alt="Kydo" className="w-12 h-12 rounded-lg" />
-                <span className="text-lg font-bold text-gray-900">Kydo Solutions</span>
+              <div className="flex items-center gap-2">
+                <img src={logoUrl} alt={`${brandName} Logo`} className="h-8 w-8 rounded-lg" style={{ background: 'none', filter: 'invert(0)' }} />
+                <span className="text-xl font-bold text-gray-900">{brandName}</span>
               </div>
             )}
             {isSidebarCollapsed && (
-              <img src="/kydoicon.png" alt="Kydo" className="w-12 h-12 rounded-lg" />
+              <img src={logoUrl} alt={`${brandName} Logo`} className="h-8 w-8" style={{ background: 'none', filter: 'invert(0)' }} />
             )}
-            <button className="md:hidden" onClick={() => setIsSidebarOpen(false)} title="Close sidebar">
+            <button type="button" className="md:hidden" onClick={() => setIsSidebarOpen(false)} title="Close sidebar" aria-label="Close sidebar">
               <X className="w-5 h-5 text-gray-500" />
             </button>
           </div>
 
           {/* Toggle Button - On Right Border */}
           <button 
+            type="button"
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
             className="hidden md:flex absolute -right-3 top-6 w-7 h-7 bg-white text-gray-900 rounded-full items-center justify-center hover:bg-gray-100 transition-colors shadow-md border border-gray-200 z-40"
             title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -660,6 +679,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
           <div className="p-4 border-t border-gray-200">
             <button 
+              type="button"
               onClick={async () => {
                 try {
                   await logout();
@@ -669,6 +689,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
               }}
               className="w-full flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
               title={isSidebarCollapsed ? "Sign Out" : ""}
+              aria-label="Sign Out"
             >
               <LogOut className="w-5 h-5 flex-shrink-0" />
               {!isSidebarCollapsed && <span className="font-medium">Sign Out</span>}
@@ -679,9 +700,6 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        {/* Status Bar Spacer - Dark area to sit behind device status bar */}
-        <div className="status-bar-spacer bg-gray-900 w-full flex-shrink-0"></div>
-        
         {/* Notification Permission Banner */}
         {showNotifPermissionBanner && (
           <div className="bg-blue-50 border-b border-blue-200 px-4 py-3 flex items-center justify-between gap-4">
@@ -693,16 +711,17 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
             </div>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={handleEnableNotifications}
                 className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
               >
                 Enable
               </button>
               <button
+                type="button"
                 onClick={() => setShowNotifPermissionBanner(false)}
-                aria-label="Dismiss notification banner"
-                title="Dismiss notification banner"
                 className="text-blue-600 px-2 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors"
+                aria-label="Dismiss notification permission banner"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -712,18 +731,20 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
         
         {/* Top Navbar */}
         {/* Added relative and z-20 to ensure dropdowns overlap sticky content in main */}
-        <header className="h-14 sm:h-20 bg-white border-b border-gray-200 flex items-center justify-between px-3 sm:px-6 relative z-20">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 sm:px-6 relative z-10">
           <div className="flex items-center gap-4">
-            <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Toggle sidebar menu">
+            <button type="button" onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Toggle sidebar menu" aria-label="Toggle sidebar menu">
               <Menu className="w-6 h-6" />
             </button>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
               <button 
+                type="button"
                 onClick={() => setIsNotifOpen(!isNotifOpen)}
                 className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                 title="Toggle notifications"
+                aria-label="Toggle notifications"
               >
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
@@ -735,16 +756,11 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                 isOpen={isNotifOpen} 
                 onClose={() => setIsNotifOpen(false)}
                 projects={projects}
-                onDeepLink={(target) => {
-                  executeDeepLink(target, {
-                    setCurrentView,
-                    setSelectedProject,
-                    setSelectedTask,
-                    setInitialProjectTab,
-                    projects,
-                    tasks: realTimeTasks
-                  });
-                  setIsNotifOpen(false);
+                onSelectProject={(project, opts) => {
+                  setSelectedProject(project);
+                  setSelectedTask(null);
+                  setIsTaskOnlyView(false);
+                  setInitialProjectTab(opts?.initialTab);
                 }}
               />
             </div>
@@ -761,10 +777,9 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
 
         {/* View Content */}
         <main 
-          className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 relative z-0" 
+          className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-4 sm:p-6 relative z-0" 
           onClick={() => isNotifOpen && setIsNotifOpen(false)}
         >
-          <div className="px-4 sm:px-6 py-2 sm:py-4 pb-12 sm:pb-16 h-full flex flex-col">
           {isLoading && (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
@@ -779,6 +794,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
               {selectedProject ? (
                  <ProjectDetail 
                    project={selectedProject} 
+                   projects={projects}
                    users={users} 
                    onUpdateProject={handleUpdateProject}
                    onBack={() => { 
@@ -811,19 +827,17 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                   }} />}
                   
                   {currentView === 'projects' && (
-                    <div className="space-y-6 pb-12">
+                    <div className="space-y-6">
                       <div className="flex justify-between items-center">
                         <h2 className="text-2xl font-bold text-gray-800">Projects</h2>
                           {(user.role === Role.ADMIN) && (
-                            <button 
-                              onClick={() => {
-                                setEditingProject(null);
-                                setIsNewProjectModalOpen(true);
-                              }}
-                              className="bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2"
-                            >
-                               <Palette className="w-4 h-4" /> New Project
-                            </button>
+                              <button 
+                                type="button"
+                                onClick={() => setIsNewProjectModalOpen(true)}
+                                className="bg-gray-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-gray-800 transition-colors shadow-sm flex items-center gap-2"
+                              >
+                                 <Palette className="w-4 h-4" /> New Project
+                              </button>
                           )}
                       </div>
 
@@ -957,11 +971,11 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                               >
                                 <option value="recent-desc">Recent (Newest First)</option>
                                 <option value="recent-asc">Recent (Oldest First)</option>
-                                <option value="name-asc">Name (A-Z)</option>
-                                <option value="name-desc">Name (Z-A)</option>
-                                <option value="progress-asc">Progress (Low to High)</option>
-                                <option value="progress-desc">Progress (High to Low)</option>
-                              </select>
+                              <option value="name-asc">Name (A-Z)</option>
+                              <option value="name-desc">Name (Z-A)</option>
+                              <option value="progress-asc">Progress (Low to High)</option>
+                              <option value="progress-desc">Progress (High to Low)</option>
+                            </select>
                             </div>
 
                             {(projectNameFilter || projectCategoryFilterValue !== 'All') && (
@@ -1092,11 +1106,12 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                   }} />}
                   
                   {currentView === 'settings' && (
-                    <div className="max-w-3xl mx-auto space-y-8 pb-12">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-800 mb-2">Settings</h2>
-                        <p className="text-gray-600">Manage your account security and preferences</p>
-                      </div>
+                    <div className="w-full min-h-full">
+                      <div className="max-w-3xl mx-auto space-y-8 pb-8">
+                        <div>
+                          <h2 className="text-2xl font-bold text-gray-800 mb-2">Settings</h2>
+                          <p className="text-gray-600">Manage your account security and preferences</p>
+                        </div>
 
                       {/* Account Info Card */}
                       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -1125,9 +1140,56 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
                         </div>
                       </div>
 
+                      {/* Branding Settings - Admin Only */}
+                      {user.role === Role.ADMIN && (
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">Company Branding</h3>
+                              <p className="text-sm text-gray-600">Customize your organization's brand name and logo</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsBrandingSettingsOpen(true)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                            >
+                              <Palette className="w-4 h-4" />
+                              Edit Branding
+                            </button>
+                          </div>
+                          <div className="bg-gray-50 p-4 rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <img src={logoUrl} alt={brandName} className="w-8 h-8 rounded" />
+                              <span className="font-medium text-gray-900">{brandName}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Firm Management for Admins */}
+                      {user.role === Role.ADMIN && (
+                        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">Firm Management</h3>
+                              <p className="text-sm text-gray-600">Switch between your firms and manage partnerships</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setIsFirmSettingsOpen(true)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                            >
+                              <Building2 className="w-4 h-4" />
+                              Manage Firms
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Remembered Devices */}
                       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                         <RememberedDevices />
+                      </div>
                       </div>
                     </div>
                   )}
@@ -1135,7 +1197,6 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
               )}
             </>
           )}
-          </div>
         </main>
       </div>
 
@@ -1148,8 +1209,26 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
           }}
           onSave={handleAddProject}
           initialProject={editingProject}
+          selectedFirmId={selectedFirmId}
         />
       )}
+      
+      {isBrandingSettingsOpen && (
+        <BrandingSettings 
+          isOpen={isBrandingSettingsOpen}
+          onClose={() => setIsBrandingSettingsOpen(false)}
+        />
+      )}
+
+      {isFirmSettingsOpen && (
+        <FirmSettings
+          isOpen={isFirmSettingsOpen}
+          onClose={() => setIsFirmSettingsOpen(false)}
+        />
+      )}
+      
+      {/* Page title updater for tenant branding */}
+      <PageTitleUpdater />
     </div>
   );
 }

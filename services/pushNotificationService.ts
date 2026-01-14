@@ -1,53 +1,11 @@
 import { getToken, onMessage } from "firebase/messaging";
 import { messaging, db } from "./firebaseConfig";
 import { doc, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
-import { Capacitor } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications';
-import { parseDeepLink } from "../utils/deepLinkHandler";
 
+/**
+ * Request notification permission for web browsers
+ */
 export const requestNotificationPermission = async (userId: string): Promise<string | null> => {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      let permStatus = await PushNotifications.checkPermissions();
-
-      if (permStatus.receive === 'prompt') {
-        permStatus = await PushNotifications.requestPermissions();
-      }
-
-      if (permStatus.receive !== 'granted') {
-        console.log('Push notification permission denied');
-        return null;
-      }
-
-      await PushNotifications.register();
-
-      return new Promise((resolve) => {
-        PushNotifications.addListener('registration', async ({ value: token }) => {
-          console.log('Push registration success, token: ' + token);
-          if (token && userId) {
-            const userRef = doc(db, "users", userId);
-            const userSnap = await getDoc(userRef);
-            if (userSnap.exists()) {
-              await updateDoc(userRef, {
-                fcmTokens: arrayUnion(token)
-              });
-              console.log("✅ Native Token saved successfully!");
-            }
-          }
-          resolve(token);
-        });
-
-        PushNotifications.addListener('registrationError', (error: any) => {
-          console.error('Error on registration: ' + JSON.stringify(error));
-          resolve(null);
-        });
-      });
-    } catch (error) {
-      console.error("Error requesting native notification permission:", error);
-      return null;
-    }
-  }
-
   if (!messaging) {
     console.log("Notification permission skipped: Messaging not supported");
     return null;
@@ -67,7 +25,6 @@ export const requestNotificationPermission = async (userId: string): Promise<str
       console.log("FCM Token received:", token ? token.substring(0, 20) + "..." : "null");
       
       if (token && userId) {
-        // Save token to user profile
         const userRef = doc(db, "users", userId);
         const userSnap = await getDoc(userRef);
         
@@ -80,8 +37,6 @@ export const requestNotificationPermission = async (userId: string): Promise<str
         } else {
           console.error("User document doesn't exist:", userId);
         }
-      } else {
-        console.error("Token or userId missing:", { hasToken: !!token, userId });
       }
       
       return token;
@@ -95,50 +50,26 @@ export const requestNotificationPermission = async (userId: string): Promise<str
   }
 };
 
+/**
+ * Listen for foreground messages
+ */
 export const onMessageListener = (addNotification?: any, onDeepLink?: (path: string) => void) =>
   new Promise((resolve) => {
-    if (Capacitor.isNativePlatform()) {
-      PushNotifications.addListener('pushNotificationReceived', (notification) => {
-        console.log('Push received: ' + JSON.stringify(notification));
-        if (addNotification) {
-          // Extract deep-link data from notification
-          const deepLinkPath = (notification.data as any)?.deepLinkPath || '/';
-          addNotification({
-            title: notification.title || 'New Notification',
-            message: notification.body || '',
-            type: 'info',
-            projectId: (notification.data as any)?.projectId,
-            taskId: (notification.data as any)?.taskId,
-            meetingId: (notification.data as any)?.meetingId,
-            targetTab: (notification.data as any)?.targetTab,
-            deepLinkPath
-          });
-          
-          // Trigger deep-link callback if provided
-          if (onDeepLink && deepLinkPath && deepLinkPath !== '/') {
-            onDeepLink(deepLinkPath);
-          }
-        }
-        resolve(notification);
-      });
-      return;
-    }
-
     if (!messaging) {
       resolve(null);
       return;
     }
+    
     onMessage(messaging, (payload) => {
       console.log("📬 Foreground message received:", payload);
       
-      // Extract deep-link data from payload
       const deepLinkPath = payload.data?.deepLinkPath || payload.fcmOptions?.link || '/';
       const projectId = payload.data?.projectId;
       const taskId = payload.data?.taskId;
       const meetingId = payload.data?.meetingId;
       const targetTab = payload.data?.targetTab;
       
-      // Show browser notification even when app is in foreground
+      // Show browser notification
       if (Notification.permission === 'granted') {
         const notificationTitle = payload.notification?.title || 'New Notification';
         const notificationOptions = {
@@ -159,12 +90,10 @@ export const onMessageListener = (addNotification?: any, onDeepLink?: (path: str
         
         const notification = new Notification(notificationTitle, notificationOptions);
         
-        // Handle notification click with deep-link support
         notification.onclick = (event) => {
           event.preventDefault();
           window.focus();
           
-          // Use deep-link callback if available, otherwise fallback to URL
           if (onDeepLink && deepLinkPath && deepLinkPath !== '/') {
             onDeepLink(deepLinkPath);
           } else if (deepLinkPath && deepLinkPath !== '/') {
@@ -177,7 +106,6 @@ export const onMessageListener = (addNotification?: any, onDeepLink?: (path: str
         console.log("✅ Browser notification displayed with deep-link:", deepLinkPath);
       }
       
-      // Add notification to app state with deep-link data
       if (addNotification) {
         addNotification({
           title: payload.notification?.title || 'New Notification',
@@ -195,33 +123,15 @@ export const onMessageListener = (addNotification?: any, onDeepLink?: (path: str
     });
   });
 
-// Get Cloud Function URL from environment or use deployed URL
-const getCloudFunctionUrl = () => {
-  const customUrl = import.meta.env.VITE_PUSH_FUNCTION_URL;
-  
-  if (customUrl) {
-    return customUrl;
-  }
-  
-  // Use the deployed Cloud Function URL
-  return 'https://sendpushnotification-jl3d2uhdra-uc.a.run.app';
-};
-
-const PUSH_FUNCTION_URL = getCloudFunctionUrl();
-
 /**
- * Sends a push notification via Cloud Function with deep-link support.
- * @param recipientId - User ID to send notification to
- * @param title - Notification title
- * @param body - Notification body/message
- * @param options - Additional options including deep-link data
+ * Send push notification via Cloud Function
  */
 export const sendPushNotification = async (
   recipientId: string,
   title: string,
   body: string,
   options?: {
-    deepLinkPath?: string; // Path like /project/abc123?tab=plan
+    deepLinkPath?: string;
     projectId?: string;
     taskId?: string;
     meetingId?: string;
@@ -230,6 +140,8 @@ export const sendPushNotification = async (
   }
 ): Promise<void> => {
   try {
+    const PUSH_FUNCTION_URL = 'https://sendpushnotification-jl3d2uhdra-uc.a.run.app';
+    
     const payload = {
       recipientId,
       title,
@@ -242,7 +154,6 @@ export const sendPushNotification = async (
       icon: options?.icon || "/icons/icon-192x192.png"
     };
 
-    // Call Cloud Function
     await fetch(PUSH_FUNCTION_URL, {
       method: 'POST',
       headers: {
@@ -256,3 +167,9 @@ export const sendPushNotification = async (
   }
 };
 
+/**
+ * Electron/Desktop notification handler (stub for compatibility)
+ */
+export const initElectronNotificationListener = () => {
+  console.log('Desktop notification system initialized');
+};
