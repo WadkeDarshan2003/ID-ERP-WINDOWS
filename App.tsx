@@ -304,7 +304,7 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
       let _unsubscribeElectron: any = null;
       try {
         if ((window as any).electronAPI) {
-          _unsubscribeElectron = initElectronNotificationListener(user.id);
+          _unsubscribeElectron = initElectronNotificationListener();
         }
       } catch (e) {
         console.warn('Electron notification init failed:', e);
@@ -794,7 +794,6 @@ function AppContent({ projects, setProjects, users, setUsers }: AppContentProps)
               {selectedProject ? (
                  <ProjectDetail 
                    project={selectedProject} 
-                   projects={projects}
                    users={users} 
                    onUpdateProject={handleUpdateProject}
                    onBack={() => { 
